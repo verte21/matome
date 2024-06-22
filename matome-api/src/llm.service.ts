@@ -5,23 +5,27 @@ import { TiktokenModel, encoding_for_model } from "tiktoken";
 import { HNSWLib } from "@langchain/community/vectorstores/hnswlib";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
-import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
 import { formatDocumentsAsString } from "langchain/util/document";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { RunnableSequence, RunnablePassthrough } from "@langchain/core/runnables";
 import { pull } from "langchain/hub";
 import * as fs from "node:fs";
 
-export class LLMService {
-  private model: ChatOpenAI;
-  private VECTOR_STORE_PATH = "Documents.index";
+export interface LLMServiceDependencies {
+  model: ChatOpenAI;
+  vectorStorePath: string;
+  modelName: TiktokenModel;
+}
 
-  constructor() {
-    this.model = new ChatOpenAI({ model: "gpt-3.5-turbo", apiKey: process.env.OPENAI_API_KEY });
-  }
+export class LLMService {
+  // private VECTOR_STORE_PATH = "Documents.index";
+
+  constructor(readonly dependencies: LLMServiceDependencies) {}
 
   async humanMessage(message: HumanMessage) {
-    const response = await this.model.invoke([new HumanMessage({ content: message.content })]);
+    const response = await this.dependencies.model.invoke([
+      new HumanMessage({ content: message.content }),
+    ]);
 
     return response.content;
   }
@@ -37,7 +41,7 @@ export class LLMService {
   }
 
   async calculateCost(input: string) {
-    const modelName: TiktokenModel = "gpt-3.5-turbo";
+    const modelName: TiktokenModel = this.dependencies.modelName;
     const encoder = encoding_for_model(modelName);
 
     const tokens = encoder.encode(input);
@@ -65,6 +69,8 @@ export class LLMService {
   }
 
   async getSummary(question: string, path: string) {
+    const { model } = this.dependencies;
+
     const document = await this.loadCsv(path);
 
     const estimateCost = await this.calculateCost(JSON.stringify(document));
@@ -86,7 +92,7 @@ export class LLMService {
         question: new RunnablePassthrough(),
       },
       prompt,
-      this.model,
+      model,
       new StringOutputParser(),
     ]);
 
@@ -96,10 +102,11 @@ export class LLMService {
   }
 
   async getVectorStore(document: Awaited<ReturnType<CSVLoader["load"]>>) {
-    if (fs.existsSync(this.VECTOR_STORE_PATH)) {
+    const { vectorStorePath } = this.dependencies;
+    if (fs.existsSync(vectorStorePath)) {
       console.log("Loading vector store");
 
-      const vectorStore = await HNSWLib.load(this.VECTOR_STORE_PATH, new OpenAIEmbeddings());
+      const vectorStore = await HNSWLib.load(vectorStorePath, new OpenAIEmbeddings());
       return vectorStore;
     } else {
       const textSplitter = new RecursiveCharacterTextSplitter({ chunkSize: 1000 });
@@ -114,7 +121,7 @@ export class LLMService {
 
       const vectorStore = await HNSWLib.fromDocuments(splitDocs, new OpenAIEmbeddings());
 
-      await vectorStore.save(this.VECTOR_STORE_PATH);
+      await vectorStore.save(vectorStorePath);
 
       return vectorStore;
     }
