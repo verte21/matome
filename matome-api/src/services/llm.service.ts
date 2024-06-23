@@ -10,6 +10,7 @@ import { StringOutputParser } from "@langchain/core/output_parsers";
 import { RunnableSequence, RunnablePassthrough } from "@langchain/core/runnables";
 import { pull } from "langchain/hub";
 import * as fs from "node:fs";
+import { isArrayOfStrings } from "../utils/isArrayOfStrings";
 
 export interface LLMServiceDependencies {
   model: ChatOpenAI;
@@ -18,8 +19,6 @@ export interface LLMServiceDependencies {
 }
 
 export class LLMService {
-  // private VECTOR_STORE_PATH = "Documents.index";
-
   constructor(readonly dependencies: LLMServiceDependencies) {}
 
   async humanMessage(message: HumanMessage) {
@@ -127,7 +126,3 @@ export class LLMService {
     }
   }
 }
-
-const isArrayOfStrings = (input: any): input is string[] => {
-  return Array.isArray(input) && input.every((item) => typeof item === "string");
-};
