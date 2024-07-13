@@ -1,6 +1,5 @@
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { HumanMessage } from "@langchain/core/messages";
-import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
 import { TiktokenModel, encoding_for_model } from "tiktoken";
 import { HNSWLib } from "@langchain/community/vectorstores/hnswlib";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
@@ -11,6 +10,8 @@ import { RunnableSequence, RunnablePassthrough } from "@langchain/core/runnables
 import { pull } from "langchain/hub";
 import * as fs from "node:fs";
 import { isArrayOfStrings } from "../utils/isArrayOfStrings";
+import { AvailableLoadersType, LoadersFactory } from "../modules/document/loaders/loaders.factory";
+import { Document } from "@langchain/core/documents";
 
 export interface LLMServiceDependencies {
   model: ChatOpenAI;
@@ -27,16 +28,6 @@ export class LLMService {
     ]);
 
     return response.content;
-  }
-
-  async loadCsv(path: string) {
-    console.log("Loading CSV");
-
-    const loaded = new CSVLoader(path).load();
-
-    console.log("Loaded CSV");
-
-    return loaded;
   }
 
   async calculateCost(input: string) {
@@ -67,10 +58,15 @@ export class LLMService {
     });
   }
 
-  async getSummary(question: string, path: string) {
+  async getSummary(input: {
+    question: string;
+    documentPath: string;
+    documentType: AvailableLoadersType;
+  }) {
+    const { question, documentPath, documentType } = input;
     const { model } = this.dependencies;
 
-    const document = await this.loadCsv(path);
+    const document = await new LoadersFactory().getLoader(documentType).load(documentPath);
 
     const estimateCost = await this.calculateCost(JSON.stringify(document));
 
@@ -78,12 +74,10 @@ export class LLMService {
       return;
     }
 
-    const vectorStore = await this.getVectorStore(document);
+    const vectorStore = await this.getVectorStoreForDocument(document);
     const retriever = vectorStore.asRetriever();
 
     const prompt = await pull<ChatPromptTemplate>("rlm/rag-prompt");
-
-    console.log(prompt.promptMessages.map((msg) => msg).join("\n"));
 
     const declarativeRagChain = RunnableSequence.from([
       {
@@ -100,7 +94,7 @@ export class LLMService {
     return response;
   }
 
-  async getVectorStore(document: Awaited<ReturnType<CSVLoader["load"]>>) {
+  async getVectorStoreForDocument(document: Document<Record<string, any>>[]) {
     const { vectorStorePath } = this.dependencies;
     if (fs.existsSync(vectorStorePath)) {
       console.log("Loading vector store");
